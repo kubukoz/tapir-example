@@ -17,6 +17,9 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.http4s.Http4sServerOptions
 import cats.effect.Sync
 import cats.effect.ContextShift
+import org.http4s.client.blaze.BlazeClientBuilder
+import sttp.client.http4s.Http4sBackend
+import cats.effect.Blocker
 
 final case class CreateInventoryCommand(skuId: Long, amount: Int)
 final case class CreateInventoryResult(inventoryId: Long)
@@ -263,11 +266,35 @@ object Hello extends IOApp {
       .toYaml
   )
 
+  val client = (
+    BlazeClientBuilder[IO](ExecutionContext.global).resource,
+    Blocker[IO]
+  ).tupled
+    .map {
+      case (client, blocker) =>
+        Http4sBackend.usingClient(client, blocker)
+    }
+    .map { backend =>
+      commons.sttpClient(
+        Uri("localhost", 8080),
+        InventoryRoutes.endpoints,
+        backend
+      )
+    }
+
   val server = BlazeServerBuilder[IO](ExecutionContext.global)
     .bindHttp(8080, "0.0.0.0")
     .withHttpApp(routez.orNotFound)
     .resource
 
   def run(args: List[String]): IO[ExitCode] =
-    server.use(_ => IO.never)
+    (server, client).tupled
+      .use {
+        case (_, client) =>
+          client.createInventory
+            .run(CreateInventoryCommand(100L, 10))
+            .value
+            .flatMap { result => IO(println(result)) }
+      }
+      .as(ExitCode.Success)
 }
