@@ -20,12 +20,8 @@ import cats.effect.ContextShift
 import org.http4s.client.blaze.BlazeClientBuilder
 import sttp.client.http4s.Http4sBackend
 import cats.effect.Blocker
+import org.http4s.server.Server
 
-final case class CreateInventoryCommand(skuId: Long, amount: Int)
-final case class CreateInventoryResult(inventoryId: Long)
-final case class CreateInventoryError(errorCode: Int)
-
-//
 //
 //
 //
@@ -133,65 +129,7 @@ object commons {
 
 }
 
-//
-//
-//
-//
-//
-//
-//user code
-//
-//
-//
-//
-//
-//
-import commons.Impl
-
-trait InventoryRoutes[E[_, _, _]] {
-  def createInventory
-      : E[CreateInventoryCommand, CreateInventoryError, CreateInventoryResult]
-}
-
-trait InventoryService[F[_]] {
-  def createInventory(
-      cmd: CreateInventoryCommand
-  ): F[Either[CreateInventoryError, CreateInventoryResult]]
-}
-
-object InventoryRoutes {
-  //business logic - implementation of server
-  def serverImpl[F[_]](
-      service: InventoryService[F]
-  ): InventoryRoutes[Impl[F]#L] = new InventoryRoutes[Impl[F]#L] {
-
-    val createInventory: Impl[F]#L[
-      CreateInventoryCommand,
-      CreateInventoryError,
-      CreateInventoryResult
-    ] = Kleisli { input => EitherT(service.createInventory(input)) }
-  }
-
-  //description of endpoint
-  val endpoints: InventoryRoutes[Endpoint[*, *, *, Nothing]] =
-    new InventoryRoutes[Endpoint[*, *, *, Nothing]] {
-      val createInventory: Endpoint[
-        CreateInventoryCommand,
-        CreateInventoryError,
-        CreateInventoryResult,
-        Nothing
-      ] = {
-        import sttp.tapir._
-        import sttp.tapir.json.circe._
-
-        infallibleEndpoint
-          .in("inventory")
-          .post
-          .in(jsonBody[CreateInventoryCommand])
-          .out(jsonBody[CreateInventoryResult])
-          .errorOut(jsonBody[CreateInventoryError])
-      }
-    }
+trait Boilerplate {
 
   //
   //
@@ -199,7 +137,7 @@ object InventoryRoutes {
   //
   //
   //
-  //boilrpleate - should be generated automatically
+  //boilerplate - should be generated automatically
   //
   //
   //
@@ -237,7 +175,72 @@ object InventoryRoutes {
           alg: InventoryRoutes[F]
       ): NonEmptyList[F[_, _, _]] = NonEmptyList.of(alg.createInventory)
     }
+}
 
+//
+//
+//
+//
+//
+//
+//user code
+//
+//
+//
+//
+//
+//
+
+final case class CreateInventoryCommand(skuId: Long, amount: Int)
+final case class CreateInventoryResult(inventoryId: Long)
+final case class CreateInventoryError(errorCode: Int)
+
+import commons.Impl
+
+trait InventoryRoutes[E[_, _, _]] {
+  def createInventory
+      : E[CreateInventoryCommand, CreateInventoryError, CreateInventoryResult]
+}
+
+trait InventoryService[F[_]] {
+  def createInventory(
+      cmd: CreateInventoryCommand
+  ): F[Either[CreateInventoryError, CreateInventoryResult]]
+}
+
+object InventoryRoutes extends Boilerplate {
+  //business logic - implementation of server
+  def serverImpl[F[_]](
+      service: InventoryService[F]
+  ): InventoryRoutes[Impl[F]#L] = new InventoryRoutes[Impl[F]#L] {
+
+    val createInventory: Impl[F]#L[
+      CreateInventoryCommand,
+      CreateInventoryError,
+      CreateInventoryResult
+    ] = Kleisli { input => EitherT(service.createInventory(input)) }
+  }
+
+  //description of endpoint
+  val endpoints: InventoryRoutes[Endpoint[*, *, *, Nothing]] =
+    new InventoryRoutes[Endpoint[*, *, *, Nothing]] {
+      val createInventory: Endpoint[
+        CreateInventoryCommand,
+        CreateInventoryError,
+        CreateInventoryResult,
+        Nothing
+      ] = {
+        import sttp.tapir._
+        import sttp.tapir.json.circe._
+
+        infallibleEndpoint
+          .in("inventory")
+          .post
+          .in(jsonBody[CreateInventoryCommand])
+          .out(jsonBody[CreateInventoryResult])
+          .errorOut(jsonBody[CreateInventoryError])
+      }
+    }
 }
 
 object Hello extends IOApp {
@@ -267,35 +270,36 @@ object Hello extends IOApp {
       .toYaml
   )
 
-  val client = (
-    BlazeClientBuilder[IO](ExecutionContext.global).resource,
-    Blocker[IO]
-  ).tupled
-    .map {
-      case (client, blocker) =>
-        Http4sBackend.usingClient(client, blocker)
-    }
-    .map { backend =>
-      commons.sttpClient(
-        Uri("localhost", 8080),
-        InventoryRoutes.endpoints,
-        backend
-      )
-    }
+  def runClient(server: Server[IO]) = {
+    val serverUri = Uri
+      .parse(server.baseUri.renderString)
+      .leftMap(s => throw new Throwable(s))
+      .merge
 
-  val server = BlazeServerBuilder[IO](ExecutionContext.global)
+    Blocker[IO]
+      .flatMap(Http4sBackend.usingDefaultClientBuilder[IO](_))
+      .map { backend =>
+        commons.sttpClient(
+          serverUri,
+          InventoryRoutes.endpoints,
+          backend
+        )
+      }
+  }
+
+  val runServer = BlazeServerBuilder[IO](ExecutionContext.global)
     .bindHttp(8080, "0.0.0.0")
     .withHttpApp(routez.orNotFound)
     .resource
 
   def run(args: List[String]): IO[ExitCode] =
-    (server, client).tupled
-      .use {
-        case (_, client) =>
-          client.createInventory
-            .run(CreateInventoryCommand(100L, 10))
-            .value
-            .flatMap { result => IO(println(result)) }
+    runServer
+      .flatMap(runClient)
+      .use { client =>
+        client.createInventory
+          .run(CreateInventoryCommand(100L, 10))
+          .value
       }
+      .flatMap { result => IO(println(result)) }
       .as(ExitCode.Success)
 }
