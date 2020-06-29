@@ -204,7 +204,8 @@ trait InventoryRoutes[E[_, _, _]] {
 
 trait InventoryService[F[_]] {
   def createInventory(
-      cmd: CreateInventoryCommand
+      skuId: Long,
+      amount: Int
   ): F[Either[CreateInventoryError, CreateInventoryResult]]
 }
 
@@ -218,7 +219,9 @@ object InventoryRoutes extends Boilerplate {
       CreateInventoryCommand,
       CreateInventoryError,
       CreateInventoryResult
-    ] = Kleisli { input => EitherT(service.createInventory(input)) }
+    ] = Kleisli { input =>
+      EitherT(service.createInventory(input.skuId, input.amount))
+    }
   }
 
   //description of endpoint
@@ -251,7 +254,7 @@ object Hello extends IOApp {
 
   import org.http4s.implicits._
 
-  val impl: InventoryService[IO] = i =>
+  val impl: InventoryService[IO] = (_, _) =>
     IO(println("demo")).as(Right(CreateInventoryResult(42L)))
 
   val routez = {
