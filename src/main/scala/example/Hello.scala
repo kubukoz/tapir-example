@@ -160,13 +160,46 @@ trait InventoryService[F[_]] {
 }
 
 object InventoryRoutes {
+  //business logic - implementation of server
+  def serverImpl[F[_]](
+      service: InventoryService[F]
+  ): InventoryRoutes[Impl[F]#L] = new InventoryRoutes[Impl[F]#L] {
+
+    val createInventory: Impl[F]#L[
+      CreateInventoryCommand,
+      CreateInventoryError,
+      CreateInventoryResult
+    ] = Kleisli { input => EitherT(service.createInventory(input)) }
+  }
+
+  //description of endpoint
+  val endpoints: InventoryRoutes[Endpoint[*, *, *, Nothing]] =
+    new InventoryRoutes[Endpoint[*, *, *, Nothing]] {
+      val createInventory: Endpoint[
+        CreateInventoryCommand,
+        CreateInventoryError,
+        CreateInventoryResult,
+        Nothing
+      ] = {
+        import sttp.tapir._
+        import sttp.tapir.json.circe._
+
+        infallibleEndpoint
+          .in("inventory")
+          .post
+          .in(jsonBody[CreateInventoryCommand])
+          .out(jsonBody[CreateInventoryResult])
+          .errorOut(jsonBody[CreateInventoryError])
+      }
+    }
+
   //
   //
   //
   //
   //
   //
-  //should be generated automatically
+  //boilrpleate - should be generated automatically
   //
   //
   //
@@ -205,38 +238,6 @@ object InventoryRoutes {
       ): NonEmptyList[F[_, _, _]] = NonEmptyList.of(alg.createInventory)
     }
 
-  //business logic - implementation of server
-  def serverImpl[F[_]](
-      service: InventoryService[F]
-  ): InventoryRoutes[Impl[F]#L] = new InventoryRoutes[Impl[F]#L] {
-
-    def createInventory: Impl[F]#L[
-      CreateInventoryCommand,
-      CreateInventoryError,
-      CreateInventoryResult
-    ] = Kleisli { input => EitherT(service.createInventory(input)) }
-  }
-
-  //description of endpoint
-  val endpoints: InventoryRoutes[Endpoint[*, *, *, Nothing]] =
-    new InventoryRoutes[Endpoint[*, *, *, Nothing]] {
-      def createInventory: Endpoint[
-        CreateInventoryCommand,
-        CreateInventoryError,
-        CreateInventoryResult,
-        Nothing
-      ] = {
-        import sttp.tapir._
-        import sttp.tapir.json.circe._
-
-        infallibleEndpoint
-          .in("inventory")
-          .post
-          .in(jsonBody[CreateInventoryCommand])
-          .out(jsonBody[CreateInventoryResult])
-          .errorOut(jsonBody[CreateInventoryError])
-      }
-    }
 }
 
 object Hello extends IOApp {
